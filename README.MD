@@ -15,6 +15,7 @@ This project now includes a dedicated RPG narration model:
 ## 🤗 Hugging Face
 
 👉 **GWsuryaYT/chronicle-narrator-gguf**
+Dataset 👉 **[GWsuryaYT/role-play-rpg](https://huggingface.co/datasets/GWsuryaYT/role-play-rpg)**
 
 A lightweight narrative-focused RPG model tuned for:
 
