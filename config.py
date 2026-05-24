@@ -1,11 +1,8 @@
 # config.py
-MAIN_MODEL = "qwen3:8b"
-FAST_MODEL = "qwen3:8b"
+MAIN_MODEL = "chronicle-narrator"   # your fine-tuned model
+FAST_MODEL = "chronicle-narrator"   # same model for router/librarian too
 
-# Memory Thresholds
-SUMMARY_THRESHOLD = 5   # Run sleep cycle every N messages
-
-# File Paths
+SUMMARY_THRESHOLD = 5
 HISTORY_FILE  = "data_history.json"
 GRAPH_FILE    = "data_graph.json"
 STATE_FILE    = "data_world.json"

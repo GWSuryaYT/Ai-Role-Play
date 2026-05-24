@@ -241,14 +241,6 @@ def run_sleep_cycle(episodic_memory):
 # ─── Main Chat Pipeline ────────────────────────────────────────────────────────
 
 def run_chat_turn(user_text, history):
-    """
-    Full pipeline:
-    1. Router: does this message even NEED world data?
-    2. If yes → Librarian: which specific entities/NPCs?
-    3. Build minimal targeted context
-    4. Generate response
-    Returns (response_text, debug_info_dict)
-    """
     debug = {"router": "SKIP", "entities": [], "npcs": []}
 
     needs_data = router_agent(user_text)
@@ -260,14 +252,21 @@ def run_chat_turn(user_text, history):
         debug["npcs"] = relevant_npcs
         targeted_context = build_targeted_context(relevant_world, relevant_npcs)
     else:
-        # No world data needed — still inject minimal player status so AI knows where player is
         targeted_context = build_targeted_context([], [])
 
-    prompts = load_prompts()
-    sys_prompt = prompts["system_prompt_template"].format(targeted_context=targeted_context)
+    # Fine-tuned model: keep system prompt minimal — it already knows its role.
+    # Only inject world context if there's actually something to inject.
+    if targeted_context.strip():
+        sys_content = (
+            "You are the Narrator. Use this world context to inform your response "
+            "but never quote it directly.\n\n"
+            + targeted_context
+        )
+    else:
+        sys_content = "You are the Narrator."
 
-    messages = [{"role": "system", "content": sys_prompt}]
-    messages.extend(history[-8:])  # Last 8 messages for conversational flow
+    messages = [{"role": "system", "content": sys_content}]
+    messages.extend(history[-8:])
 
     response = generate_chat(messages)
     return response, debug

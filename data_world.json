@@ -1,57 +1,8 @@
 {
     "player_status": {
-        "current_location": "Abandoned house (now partially repaired, with a makeshift fireplace area)",
-        "inventory": [
-            "Charred wood scraps (from fire-making)",
-            "gathered leaves",
-            "Basics to Advanced level of Magic practices (Fire)",
-            "Sticks (gathered for fireplace)"
-        ],
-        "active_quests": [
-            "Master Fire Magic (Beginner's Quest)"
-        ]
+        "current_location": "Unknown",
+        "inventory": [],
+        "active_quests": []
     },
-    "entities": {
-        "Smoke trail": {
-            "location": "Distant hills",
-            "state": "Faint",
-            "visibility": "Fading",
-            "movement": "Swirling toward house"
-        },
-        "Fire": {
-            "location": "Make-shift fireplace",
-            "state": "Crackling",
-            "interaction": "Book's pages glow in sync with flames"
-        },
-        "Wolves": {
-            "location": "Around the house",
-            "state": "Aggressive",
-            "visibility": "Visible",
-            "movement": "Circling house",
-            "threat_level": "High"
-        }
-    },
-    "world_state": {
-        "earth_hum": "Low hum rises from ground",
-        "smoke_movement": "Swirling toward house",
-        "fire_interaction": "Book's pages glow in sync with flames",
-        "earth_memory": "Earth remembers fire's breath",
-        "forest_watch": "Forest watches, awaiting action",
-        "fire_magic_riddle": "Fire is the breath of the earth, and the earth remembers.",
-        "wolf_threat": "A pack of wolves surrounds the house, ready to attack",
-        "wolf_count": "Approximately 10 wolves",
-        "wolf_behavior": "Circling house, aggressive stance",
-        "wolf_status": "Threat level: High",
-        "wolf_origin": "Unknown, possibly drawn by fire or magical energy",
-        "wolf_impact": "Direct threat to player's safety",
-        "wolf_interaction": "Player is unaware, currently asleep",
-        "wolf_resolution": "Player must act to neutralize or evade threat before attack occurs",
-        "wolf_connection": "Potential link to forest's magic or fire's energy"
-    },
-    "wolf_status": "Threat level: High",
-    "wolf_origin": "Unknown, possibly drawn by fire or magical energy",
-    "wolf_impact": "Direct threat to player's safety",
-    "wolf_interaction": "Player is unaware, currently asleep",
-    "wolf_resolution": "Player must act to neutralize or evade threat before attack occurs",
-    "wolf_connection": "Potential link to forest's magic or fire's energy"
+    "entities": {}
 }
