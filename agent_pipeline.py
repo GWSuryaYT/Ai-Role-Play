@@ -5,14 +5,13 @@ import os
 from config import MAIN_MODEL, FAST_MODEL
 from world_state import load_world_state, update_world_state, get_entity_keys
 
-PROMPTS_FILE = "config_prompts.json"
+PROMPTS_FILE    = "config_prompts.json"
 NPC_MEMORY_FILE = "data_npc_memory.json"
 
 DEFAULT_PROMPTS = {
     "system_prompt_template": (
-        "You are an immersive RPG narrator and character simulator. Stay in character at all times.\n"
-        "Maintain narrative continuity and never contradict established facts.\n\n"
-        "{targeted_context}"
+        "You are the Narrator. Use this world context to inform your response "
+        "but never quote it directly.\n\n{targeted_context}"
     ),
     "router_prompt": (
         "You are a smart routing agent. Decide if the user's message needs world/entity data to answer well.\n"
@@ -20,6 +19,16 @@ DEFAULT_PROMPTS = {
         "Return NO if it's casual dialogue, simple actions, jokes, or general conversation that needs no external memory.\n\n"
         "User message: {user_input}\n\n"
         "Output strictly: {{\"needs_world_data\": true}} or {{\"needs_world_data\": false}}"
+    ),
+    "tone_router_prompt": (
+        "You are a tone classifier for an RPG game.\n"
+        "Read the user message and classify it into exactly one of these tones:\n\n"
+        "  ACTION   - Player is performing a physical action in the world (attacking, moving, casting, exploring)\n"
+        "  DIALOGUE - Player is speaking to an NPC or character in the world\n"
+        "  REFLECT  - Player is thinking, planning, reading, or processing information inside the world\n"
+        "  OOC      - Out of character: player is just chatting, hyping, reacting casually, asking meta questions\n\n"
+        "User message: {user_input}\n\n"
+        "Output strictly: {{\"tone\": \"ACTION\"}} or {{\"tone\": \"DIALOGUE\"}} or {{\"tone\": \"REFLECT\"}} or {{\"tone\": \"OOC\"}}"
     ),
     "librarian_prompt": (
         "You are a librarian. Identify which Known Entities are relevant to the User Input.\n"
@@ -57,8 +66,33 @@ DEFAULT_PROMPTS = {
     )
 }
 
+# Narration instructions per tone — injected into system prompt
+TONE_INSTRUCTIONS = {
+    "ACTION": (
+        "The player is performing an action. Respond with vivid atmospheric narration. "
+        "Describe outcomes, sensations, consequences. Stay in second-person. "
+        "No meta commentary. No lists."
+    ),
+    "DIALOGUE": (
+        "The player is speaking to a character. Respond AS that character or narrate the exchange. "
+        "Stay fully in-world. Voice the NPC naturally based on their personality. "
+        "Remember prior interactions."
+    ),
+    "REFLECT": (
+        "The player is thinking, reading, or planning inside the world. "
+        "Respond with immersive inner-world narration or information delivery. "
+        "Keep it grounded and atmospheric, not dramatic."
+    ),
+    "OOC": (
+        "The player is speaking out of character — just chatting or reacting casually. "
+        "Respond conversationally and warmly as their game companion. "
+        "You can briefly acknowledge the world context but do NOT write dramatic narration. "
+        "Keep it short, natural, friendly. Match their energy."
+    ),
+}
 
-# ─── File I/O ──────────────────────────────────────────────────────────────────
+
+# ─── File I/O ─────────────────────────────────────────────────────────────────
 
 def load_prompts():
     if not os.path.exists(PROMPTS_FILE):
@@ -67,7 +101,6 @@ def load_prompts():
         return DEFAULT_PROMPTS
     with open(PROMPTS_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
-    # Backfill any missing keys from defaults
     for k, v in DEFAULT_PROMPTS.items():
         if k not in data:
             data[k] = v
@@ -88,14 +121,13 @@ def save_npc_memory(data):
         json.dump(data, f, indent=2)
 
 
-# ─── Core LLM Calls ────────────────────────────────────────────────────────────
+# ─── Core LLM ─────────────────────────────────────────────────────────────────
 
 def generate_chat(messages, model=MAIN_MODEL):
     response = ollama.chat(model=model, messages=messages)
     return response['message']['content']
 
 def _fast_json_call(prompt):
-    """Helper: call fast model, return parsed JSON or None."""
     try:
         response = ollama.generate(model=FAST_MODEL, prompt=prompt, format="json")
         return json.loads(response['response'])
@@ -103,71 +135,69 @@ def _fast_json_call(prompt):
         return None
 
 
-# ─── Router Agent ──────────────────────────────────────────────────────────────
+# ─── Tone Router ──────────────────────────────────────────────────────────────
 
-def router_agent(user_input):
+def tone_router(user_input):
     """
-    Stage 1: Decide if world data is needed AT ALL.
-    Returns True if we should fetch from world state, False if we can skip entirely.
-    This prevents burning context on casual messages like 'lol ok' or 'tell me a joke'.
+    Classifies the message tone: ACTION / DIALOGUE / REFLECT / OOC.
+    OOC messages get a conversational reply instead of dramatic narration.
+    Falls back to REFLECT on failure (safe middle ground).
     """
     prompts = load_prompts()
-    prompt = prompts["router_prompt"].format(user_input=user_input)
-    result = _fast_json_call(prompt)
+    prompt  = prompts["tone_router_prompt"].format(user_input=user_input)
+    result  = _fast_json_call(prompt)
     if result is None:
-        return False  # If routing fails, skip world data rather than waste tokens
+        return "REFLECT"
+    tone = result.get("tone", "REFLECT").upper()
+    return tone if tone in TONE_INSTRUCTIONS else "REFLECT"
+
+
+# ─── World Data Router ────────────────────────────────────────────────────────
+
+def router_agent(user_input):
+    prompts = load_prompts()
+    prompt  = prompts["router_prompt"].format(user_input=user_input)
+    result  = _fast_json_call(prompt)
+    if result is None:
+        return False
     return result.get("needs_world_data", False)
 
 
-# ─── Librarian Agent ───────────────────────────────────────────────────────────
+# ─── Librarian ────────────────────────────────────────────────────────────────
 
 def librarian_agent(user_input, recent_chat):
-    """
-    Stage 2 (only runs if router said YES): 
-    Find which specific entities from world state are relevant.
-    Also checks NPC memory for known characters.
-    """
     known_entities = get_entity_keys()
-    npc_memory = load_npc_memory()
-    known_npcs = list(npc_memory.get("npcs", {}).keys())
-    
-    all_known = list(set(known_entities + known_npcs))
+    npc_memory     = load_npc_memory()
+    known_npcs     = list(npc_memory.get("npcs", {}).keys())
+    all_known      = list(set(known_entities + known_npcs))
+
     if not all_known:
         return [], []
 
     prompts = load_prompts()
-    prompt = prompts["librarian_prompt"].format(
+    prompt  = prompts["librarian_prompt"].format(
         entities_list=", ".join(all_known),
         user_input=user_input
     )
     result = _fast_json_call(prompt)
     if result is None:
         return [], []
-    
-    relevant = result.get("relevant", [])
-    
-    # Split into world entities vs NPC names
+
+    relevant       = result.get("relevant", [])
     relevant_world = [r for r in relevant if r in known_entities]
     relevant_npcs  = [r for r in relevant if r in known_npcs]
     return relevant_world, relevant_npcs
 
 
-# ─── Context Builder ───────────────────────────────────────────────────────────
+# ─── Context Builder ──────────────────────────────────────────────────────────
 
 def build_targeted_context(relevant_world_entities, relevant_npc_names):
-    """
-    Assembles a lean context string from only what was requested.
-    Pulls from world_state for locations/quests/facts,
-    and from npc_memory for character personalities and past interactions.
-    """
     from world_state import get_targeted_context as _world_ctx
     context = ""
 
-    # World data (locations, quests, items, etc.)
     if relevant_world_entities:
         context += _world_ctx(relevant_world_entities)
 
-    # NPC memory (who they are, what was said last time)
     if relevant_npc_names:
         npc_data = load_npc_memory().get("npcs", {})
         context += "\n[NPC MEMORY FILES]\n"
@@ -181,92 +211,123 @@ def build_targeted_context(relevant_world_entities, relevant_npc_names):
                 context += f"  Topics discussed before: {npc.get('topics_discussed', 'None')}\n"
                 context += f"  Last interaction: {npc.get('last_interaction_summary', 'No prior meeting')}\n\n"
 
-    # Always include player status (tiny, always relevant)
     if not context:
-        context = _world_ctx([])  # Just player status, no entities
+        context = _world_ctx([])
 
     return context
 
 
-# ─── Sleep Cycle ───────────────────────────────────────────────────────────────
+# ─── History Cleaner ──────────────────────────────────────────────────────────
+
+def get_clean_history(full_history, current_user_text, window=8):
+    """
+    Returns the last N messages EXCLUDING the current user message.
+    The current message is already being passed as the trigger —
+    feeding it again in history causes the model to treat it as already-answered.
+    """
+    # Strip the last entry if it matches the current user text (just appended)
+    trimmed = full_history[:]
+    if trimmed and trimmed[-1].get("role") == "user" and trimmed[-1].get("content") == current_user_text:
+        trimmed = trimmed[:-1]
+
+    return trimmed[-window:]
+
+
+# ─── Sleep Cycle ──────────────────────────────────────────────────────────────
 
 def run_sleep_cycle(episodic_memory):
-    """
-    Runs two background tasks:
-    1. Update world state (locations, quests, world conditions)
-    2. Update NPC memory (personalities, what was discussed, relationships)
-    """
-    chat_log = "\n".join([f"{m['role']}: {m['content']}" for m in episodic_memory[-6:]])
+    chat_log      = "\n".join([f"{m['role']}: {m['content']}" for m in episodic_memory[-6:]])
     current_state = load_world_state()
-    prompts = load_prompts()
+    prompts       = load_prompts()
 
-    # ── Task 1: World State Update ──
     world_prompt = prompts["sleep_cycle_prompt"].format(
         current_state=json.dumps(current_state, indent=2),
         chat_log=chat_log
     )
     try:
-        print("\n[BACKGROUND] Running Sleep Cycle: World State...")
-        response = ollama.generate(model=MAIN_MODEL, prompt=world_prompt, format="json")
+        print("\n[BACKGROUND] Sleep Cycle: World State...")
+        response  = ollama.generate(model=MAIN_MODEL, prompt=world_prompt, format="json")
         new_state = json.loads(response['response'])
         if "player_status" in new_state and "entities" in new_state:
             update_world_state(new_state)
             print("[BACKGROUND] World state updated.")
     except Exception as e:
-        print(f"[BACKGROUND] World State update failed: {e}")
+        print(f"[BACKGROUND] World State failed: {e}")
 
-    # ── Task 2: NPC Memory Update ──
     current_npc_memory = load_npc_memory()
     npc_prompt = prompts["npc_memory_prompt"].format(
         current_npc_memory=json.dumps(current_npc_memory, indent=2),
         chat_log=chat_log
     )
     try:
-        print("[BACKGROUND] Running Sleep Cycle: NPC Memory...")
-        response = ollama.generate(model=FAST_MODEL, prompt=npc_prompt, format="json")
+        print("[BACKGROUND] Sleep Cycle: NPC Memory...")
+        response   = ollama.generate(model=FAST_MODEL, prompt=npc_prompt, format="json")
         npc_update = json.loads(response['response'])
-        
         if "npcs" in npc_update:
-            # Merge: preserve existing NPCs not in this update
             merged = current_npc_memory.get("npcs", {})
             merged.update(npc_update["npcs"])
             save_npc_memory({"npcs": merged})
             print(f"[BACKGROUND] NPC memory updated: {list(npc_update['npcs'].keys())}")
     except Exception as e:
-        print(f"[BACKGROUND] NPC Memory update failed: {e}")
+        print(f"[BACKGROUND] NPC Memory failed: {e}")
 
     return True
 
 
-# ─── Main Chat Pipeline ────────────────────────────────────────────────────────
+# ─── Main Chat Pipeline ───────────────────────────────────────────────────────
 
 def run_chat_turn(user_text, history):
-    debug = {"router": "SKIP", "entities": [], "npcs": []}
+    """
+    Pipeline:
+    1. Tone router  — what kind of message is this? (ACTION/DIALOGUE/REFLECT/OOC)
+    2. World router — does it need world data?
+    3. Librarian    — which specific entities/NPCs?
+    4. Build system prompt with tone instruction + context
+    5. Feed clean history (no duplicate of current message)
+    6. Generate
+    """
+    debug = {"router": "SKIP", "entities": [], "npcs": [], "tone": "REFLECT"}
 
-    needs_data = router_agent(user_text)
-    debug["router"] = "FETCH" if needs_data else "SKIP"
+    # ── Step 1: Tone classification ──────────────────────────────────────────
+    tone = tone_router(user_text)
+    debug["tone"] = tone
 
-    if needs_data:
-        relevant_world, relevant_npcs = librarian_agent(user_text, history)
-        debug["entities"] = relevant_world
-        debug["npcs"] = relevant_npcs
-        targeted_context = build_targeted_context(relevant_world, relevant_npcs)
+    # ── Step 2: World data decision ──────────────────────────────────────────
+    # OOC messages never need world data — skip both router calls
+    if tone == "OOC":
+        targeted_context = ""
+        debug["router"]  = "SKIP (OOC)"
     else:
-        targeted_context = build_targeted_context([], [])
+        needs_data      = router_agent(user_text)
+        debug["router"] = "FETCH" if needs_data else "SKIP"
 
-    # Fine-tuned model: keep system prompt minimal — it already knows its role.
-    # Only inject world context if there's actually something to inject.
+        if needs_data:
+            relevant_world, relevant_npcs = librarian_agent(user_text, history)
+            debug["entities"]  = relevant_world
+            debug["npcs"]      = relevant_npcs
+            targeted_context   = build_targeted_context(relevant_world, relevant_npcs)
+        else:
+            targeted_context   = build_targeted_context([], [])
+
+    # ── Step 3: Build system prompt ──────────────────────────────────────────
+    tone_instruction = TONE_INSTRUCTIONS[tone]
+
     if targeted_context.strip():
         sys_content = (
-            "You are the Narrator. Use this world context to inform your response "
-            "but never quote it directly.\n\n"
-            + targeted_context
+            f"{tone_instruction}\n\n"
+            "World context (use to inform your response, never quote directly):\n"
+            f"{targeted_context}"
         )
     else:
-        sys_content = "You are the Narrator."
+        sys_content = tone_instruction
+
+    # ── Step 4: Clean history (no duplicate of current message) ─────────────
+    clean_history = get_clean_history(history, user_text, window=8)
 
     messages = [{"role": "system", "content": sys_content}]
-    messages.extend(history[-8:])
+    messages.extend(clean_history)
+    messages.append({"role": "user", "content": user_text})
 
+    # ── Step 5: Generate ─────────────────────────────────────────────────────
     response = generate_chat(messages)
     return response, debug

@@ -1,8 +1,19 @@
 {
-    "player_status": {
-        "current_location": "Unknown",
-        "inventory": [],
-        "active_quests": []
+    "entities": {
+        "Hunter Group": {
+            "count": 5,
+            "location": "Disturbance Zone",
+            "status": "Tracking Boar"
+        }
     },
-    "entities": {}
+    "player_status": {
+        "active_quests": [
+            "Investigate origins in this world"
+        ],
+        "current_location": "Riverbank Campsite",
+        "inventory": [
+            "Unknown fruits x3",
+            "Collective twigs for fire pit"
+        ]
+    }
 }

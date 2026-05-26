@@ -1,0 +1,33 @@
+{
+  "npcs": {
+    "Hunter Leader": {
+      "personality": [
+        "Calm",
+        "Focused"
+      ],
+      "last_seen_location": "Forest Clearing",
+      "topics_discussed": [
+        "Hunting Boar"
+      ],
+      "relationship": [
+        "Neutral"
+      ],
+      "last_interaction_summary": "Cast fire spell without fuel source"
+    },
+    "Surya": {
+      "name": "Surya",
+      "level": 1,
+      "attributes": [
+        "Magical Affinity: Multi-Elemental (Fire, Air, Earth, Water)",
+        "Base Mana Reserve: Stable",
+        "Active Skill/Spell: None Defined"
+      ],
+      "progress_updates": [
+        "Day 2 - Mastered Fire Magic Class (+4 Level)",
+        "Day 2 - Advanced Water Element Control (+3 Level)",
+        "Day 2 - Fully Dominated Earth Material Shifts (+5 Level)",
+        "Day 2 - Perfected Wind Channeling and Cloud Manipulation (+5 Level)"
+      ]
+    }
+  }
+}
