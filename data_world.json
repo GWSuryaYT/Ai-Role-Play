@@ -13,7 +13,20 @@
         "current_location": "Riverbank Campsite",
         "inventory": [
             "Unknown fruits x3",
-            "Collective twigs for fire pit"
+            "Collective twigs for fire pit",
+            "Mastered Magic Manual"
         ]
+    },
+    "mastered_skills": [
+        "Fire Manipulation (All Ranges)",
+        "Water Control (Pressurization, Purification)",
+        "Earth Shaping (Structural)",
+        "Wind Engineering (Cloud Formation)"
+    ],
+    "stats": {
+        "name": "Surya",
+        "age": "19",
+        "location": "Near city gate",
+        "mana_level": "Stable/Refined"
     }
 }

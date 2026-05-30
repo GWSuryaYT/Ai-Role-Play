@@ -1,5 +1,5 @@
 # app.py — Flask + React SPA
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import threading
 from config import SUMMARY_THRESHOLD
 from memory_manager import load_history, save_json, HISTORY_FILE, append_to_history
@@ -11,10 +11,7 @@ from agent_pipeline import (
 )
 
 app = Flask(__name__)
-
 HTML = open("ui.html", encoding="utf-8").read()
-
-from flask import Response
 
 @app.route('/')
 def home():
@@ -31,6 +28,16 @@ def edit_history():
     history = load_history()
     if 0 <= idx < len(history):
         history[idx]["content"] = new_content
+        save_json(HISTORY_FILE, history)
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Index out of range"}), 400
+
+@app.route('/api/history/delete', methods=['POST'])
+def delete_history_msg():
+    idx = request.json.get("index")
+    history = load_history()
+    if idx is not None and 0 <= idx < len(history):
+        history.pop(idx)
         save_json(HISTORY_FILE, history)
         return jsonify({"success": True})
     return jsonify({"success": False, "error": "Index out of range"}), 400
@@ -79,7 +86,8 @@ def handle_chat_turn():
         response, debug = run_chat_turn(user_text, history)
     except Exception as e:
         response = f"[Error: {e}]"
-        debug = {"router": "ERROR", "entities": [], "npcs": []}
+        debug = {"router": "ERROR", "entities": [], "npcs": [], "tone": "ERROR",
+                 "tokens": {"prompt": 0, "response": 0, "total": 0, "limit": 8192, "pct": 0}}
     append_to_history("assistant", response)
     if len(history) % SUMMARY_THRESHOLD == 0:
         threading.Thread(target=run_sleep_cycle, args=(history,), daemon=True).start()

@@ -12,6 +12,7 @@ from rag_memory import (
 
 PROMPTS_FILE    = "config_prompts.json"
 NPC_MEMORY_FILE = "data_npc_memory.json"
+CTX_LIMIT       = 8192   # your model's context window — change if you switch models
 
 DEFAULT_PROMPTS = {
     "system_prompt_template": (
@@ -97,6 +98,24 @@ TONE_INSTRUCTIONS = {
 }
 
 
+# --- Token counting -----------------------------------------------------------
+
+def count_tokens(text: str) -> int:
+    """
+    Fast approximation: 1 token ~ 3.5 chars for English prose.
+    Good enough for a usage meter. Replace with tiktoken if you want exact counts.
+    """
+    return max(1, len(text) // 3)
+
+def count_messages_tokens(messages: list) -> int:
+    total = 0
+    for m in messages:
+        total += count_tokens(m.get("content", ""))
+        total += 4   # per-message overhead (role tag etc.)
+    total += 3       # reply primer
+    return total
+
+
 # --- File I/O -----------------------------------------------------------------
 
 def load_prompts():
@@ -130,7 +149,13 @@ def save_npc_memory(data):
 
 def generate_chat(messages, model=MAIN_MODEL):
     response = ollama.chat(model=model, messages=messages)
-    return response['message']['content']
+    content  = response['message']['content']
+
+    # Pull real token counts from Ollama response if available
+    prompt_tokens   = response.get('prompt_eval_count', count_messages_tokens(messages))
+    response_tokens = response.get('eval_count',        count_tokens(content))
+
+    return content, prompt_tokens, response_tokens
 
 def _fast_json_call(prompt):
     try:
@@ -163,7 +188,7 @@ def router_agent(user_input):
     return result.get("needs_world_data", False)
 
 
-# --- Librarian (structured fallback) -----------------------------------------
+# --- Librarian ----------------------------------------------------------------
 
 def librarian_agent(user_input, recent_chat):
     known_entities = get_entity_keys()
@@ -212,7 +237,7 @@ def build_structured_context(relevant_world_entities, relevant_npc_names):
 
 # --- History Cleaner ----------------------------------------------------------
 
-def get_clean_history(full_history, current_user_text, window=8):
+def get_clean_history(full_history, current_user_text, window=6):
     trimmed = full_history[:]
     if trimmed and trimmed[-1].get("role") == "user" and trimmed[-1].get("content") == current_user_text:
         trimmed = trimmed[:-1]
@@ -226,7 +251,6 @@ def run_sleep_cycle(episodic_memory):
     current_state = load_world_state()
     prompts       = load_prompts()
 
-    # Task 1: World State
     world_prompt = prompts["sleep_cycle_prompt"].format(
         current_state=json.dumps(current_state, indent=2),
         chat_log=chat_log
@@ -243,7 +267,6 @@ def run_sleep_cycle(episodic_memory):
     except Exception as e:
         print(f"[BACKGROUND] World State failed: {e}")
 
-    # Task 2: NPC Memory
     current_npc_memory = load_npc_memory()
     npc_prompt = prompts["npc_memory_prompt"].format(
         current_npc_memory=json.dumps(current_npc_memory, indent=2),
@@ -263,7 +286,6 @@ def run_sleep_cycle(episodic_memory):
     except Exception as e:
         print(f"[BACKGROUND] NPC Memory failed: {e}")
 
-    # Task 3: RAG Index Update
     print("[BACKGROUND] Sleep Cycle: RAG indexing...")
     try:
         index_episodic(episodic_memory)
@@ -280,23 +302,13 @@ def run_sleep_cycle(episodic_memory):
 # --- Main Chat Pipeline -------------------------------------------------------
 
 def run_chat_turn(user_text, history):
-    """
-    Pipeline:
-    1. Tone router        - ACTION / DIALOGUE / REFLECT / OOC
-    2. RAG semantic query - hits episodic + lore + npc collections
-    3. World router       - structured JSON lookup needed?
-    4. Librarian          - which entities/NPCs from JSON?
-    5. Merge contexts     - RAG (semantic) + structured JSON (authoritative)
-    6. Build system prompt with tone instruction + merged context
-    7. Clean history      - no duplicate of current message
-    8. Generate
-    """
     debug = {
         "router":   "SKIP",
         "entities": [],
         "npcs":     [],
         "tone":     "REFLECT",
-        "rag":      {"episodic": 0, "lore": 0, "npc": 0}
+        "rag":      {"episodic": 0, "lore": 0, "npc": 0},
+        "tokens":   {"prompt": 0, "response": 0, "total": 0, "limit": CTX_LIMIT, "pct": 0}
     }
 
     # 1. Tone
@@ -330,7 +342,7 @@ def run_chat_turn(user_text, history):
     else:
         debug["router"] = "SKIP (OOC)"
 
-    # 5. Merge: RAG first (broad semantic), structured second (authoritative)
+    # 5. Merge contexts
     combined_context = ""
     if rag_context:
         combined_context += rag_context + "\n\n"
@@ -350,12 +362,23 @@ def run_chat_turn(user_text, history):
         sys_content = tone_instruction
 
     # 7. Clean history
-    clean_history = get_clean_history(history, user_text, window=8)
+    clean_history = get_clean_history(history, user_text, window=6)
 
     messages = [{"role": "system", "content": sys_content}]
     messages.extend(clean_history)
     messages.append({"role": "user", "content": user_text})
 
-    # 8. Generate
-    response = generate_chat(messages)
+    # 8. Generate — capture real token counts from Ollama
+    response, prompt_tokens, response_tokens = generate_chat(messages)
+
+    total = prompt_tokens + response_tokens
+    pct   = round((prompt_tokens / CTX_LIMIT) * 100)
+    debug["tokens"] = {
+        "prompt":   prompt_tokens,
+        "response": response_tokens,
+        "total":    total,
+        "limit":    CTX_LIMIT,
+        "pct":      pct,
+    }
+
     return response, debug

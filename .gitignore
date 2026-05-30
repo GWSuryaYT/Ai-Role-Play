@@ -1,3 +1,9 @@
 /Character.ai.txt
 /__pycache__
 /fine-tune
+
+data_history.json
+data_npc_memory.json
+data_world.json
+
+/data_chroma

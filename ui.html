@@ -846,6 +846,55 @@ kbd{
 ═══════════════════════════════════════════════ */
 .theme-icon{transition:transform .35s ease,opacity .2s}
 body.theme-transitioning *{transition:background var(--transition),color var(--transition),border-color var(--transition) !important}
+
+/* token meter */
+.token-meter{margin-top:8px;padding-top:7px;border-top:1px solid var(--border-subtle)}
+.tm-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.tm-label{font-size:8px;letter-spacing:.15em;text-transform:uppercase;color:var(--tx-tertiary)}
+.tm-val{font-size:10px;font-weight:600;font-family:var(--font-mono)}
+.tm-val.safe{color:var(--jade)}
+.tm-val.warn{color:var(--gold)}
+.tm-val.danger{color:var(--crimson)}
+.tm-bar-track{height:4px;background:var(--border-subtle);border-radius:99px;overflow:hidden;margin-bottom:6px}
+.tm-bar-fill{height:100%;border-radius:99px;transition:width .4s ease}
+.tm-bar-fill.safe{background:var(--jade)}
+.tm-bar-fill.warn{background:var(--gold)}
+.tm-bar-fill.danger{background:var(--crimson)}
+.tm-breakdown{display:flex;gap:8px;flex-wrap:wrap}
+.tm-chip{font-size:8.5px;color:var(--tx-tertiary);font-family:var(--font-mono)}
+.tm-chip span{color:var(--tx-secondary)}
+
+/* confirm modal */
+.modal-overlay{
+  position:fixed;inset:0;z-index:9998;
+  background:rgba(0,0,0,.65);backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;
+  animation:fade-in .15s ease;
+}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+.modal-box{
+  background:var(--bg-overlay);
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius-lg);
+  padding:24px 28px;min-width:320px;max-width:420px;
+  box-shadow:var(--shadow-lg);
+  animation:modal-in .18s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes modal-in{from{opacity:0;transform:scale(.94) translateY(8px)}to{opacity:1;transform:none}}
+.modal-icon{font-size:28px;margin-bottom:12px}
+.modal-title{font-family:var(--font-heading);font-size:14px;color:var(--tx-primary);
+  letter-spacing:.06em;margin-bottom:6px}
+.modal-body{font-size:13px;color:var(--tx-secondary);line-height:1.6;margin-bottom:20px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-btn{padding:7px 18px;border-radius:var(--radius-md);font-size:12px;
+  font-weight:600;font-family:var(--font-heading);letter-spacing:.04em;transition:all var(--transition-fast)}
+.modal-btn.cancel{background:var(--bg-raised);color:var(--tx-secondary);
+  border:1px solid var(--border-default)}
+.modal-btn.cancel:hover{color:var(--tx-primary)}
+.modal-btn.confirm{background:var(--crimson-bg);color:var(--crimson);
+  border:1px solid rgba(224,85,85,.35)}
+.modal-btn.confirm:hover{background:rgba(224,85,85,.22)}
+
 </style>
 </head>
 <body>
@@ -965,19 +1014,77 @@ function DebugPanel({debug}) {
       <div className="db-row"><span className="db-val-skip">awaiting first message…</span></div>
     </div>
   );
-  const {router, entities=[], npcs=[]} = debug;
+  const {router, entities=[], npcs=[], tone='?', rag={}, tokens={}} = debug;
+  const pct     = tokens.pct   || 0;
+  const prompt  = tokens.prompt  || 0;
+  const resp    = tokens.response|| 0;
+  const total   = tokens.total   || 0;
+  const limit   = tokens.limit   || 8192;
+  const meterCls= pct>=85?'danger':pct>=60?'warn':'safe';
+  const ragTotal= (rag.episodic||0)+(rag.lore||0)+(rag.npc||0);
+
   return (
     <div className="debug-panel">
       <div className="debug-hd"><span className="debug-hd-dot"/><span>Pipeline Monitor</span></div>
       <div className="db-row">
+        <span className="db-key">tone</span>
+        <span className="db-val-fetch">{tone}</span>
+      </div>
+      <div className="db-row">
         <span className="db-key">router</span>
-        <span className={router==='SKIP'?'db-val-skip':router==='ERROR'?'db-val-err':'db-val-fetch'}>
+        <span className={router==='SKIP'||router==='SKIP (OOC)'?'db-val-skip':router==='ERROR'?'db-val-err':'db-val-fetch'}>
           {router}
         </span>
       </div>
       {entities.length>0 && <div className="db-row"><span className="db-key">world</span><span className="db-val-world">{entities.join(', ')}</span></div>}
       {npcs.length>0     && <div className="db-row"><span className="db-key">npcs</span><span className="db-val-npc">{npcs.join(', ')}</span></div>}
-      {router==='SKIP' && <div className="db-row" style={{fontSize:'8.5px',marginTop:2}}><span className="db-val-skip">no lookup — context preserved</span></div>}
+      <div className="db-row">
+        <span className="db-key">rag hits</span>
+        <span className={ragTotal>0?'db-val-fetch':'db-val-skip'}>
+          {ragTotal>0 ? `ep:${rag.episodic||0} lore:${rag.lore||0} npc:${rag.npc||0}` : 'none'}
+        </span>
+      </div>
+
+      {/* Token meter */}
+      {total>0 && (
+        <div className="token-meter">
+          <div className="tm-row">
+            <span className="tm-label">Context Used</span>
+            <span className={`tm-val ${meterCls}`}>{pct}%</span>
+          </div>
+          <div className="tm-bar-track">
+            <div className={`tm-bar-fill ${meterCls}`} style={{width:`${Math.min(pct,100)}%`}}/>
+          </div>
+          <div className="tm-breakdown">
+            <span className="tm-chip">prompt <span>{prompt}</span></span>
+            <span className="tm-chip">reply <span>{resp}</span></span>
+            <span className="tm-chip">total <span>{total}/{limit}</span></span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── CONFIRM MODAL ───────────────────────────────────────────────────────── */
+function ConfirmModal({title, body, icon='🗑', confirmLabel='Delete', onConfirm, onCancel}) {
+  // Close on Escape
+  useEffect(()=>{
+    const h = e => { if(e.key==='Escape') onCancel(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, []);
+  return (
+    <div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onCancel();}}>
+      <div className="modal-box">
+        <div className="modal-icon">{icon}</div>
+        <div className="modal-title">{title}</div>
+        <div className="modal-body">{body}</div>
+        <div className="modal-actions">
+          <button className="modal-btn cancel" onClick={onCancel}>Cancel</button>
+          <button className="modal-btn confirm" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1004,11 +1111,12 @@ function CtxMenu({x,y,items,onClose}) {
 
 /* ── MESSAGE BUBBLE ──────────────────────────────────────────────────────── */
 function Bubble({msg,index,onEdit,onDelete,searchQ,timestamp}) {
-  const [editing,setEditing]=useState(false);
-  const [draft,setDraft]=useState(msg.content);
-  const [ctx,setCtx]=useState(null);
-  const taRef=useRef();
-  const isUser=msg.role==='user';
+  const [editing,setEditing]   = useState(false);
+  const [draft,setDraft]       = useState(msg.content);
+  const [ctx,setCtx]           = useState(null);
+  const [confirmDel,setConfirmDel] = useState(false);
+  const taRef = useRef();
+  const isUser = msg.role==='user';
 
   const startEdit=()=>{setDraft(msg.content);setEditing(true);setTimeout(()=>taRef.current?.focus(),30)};
   const cancel=()=>{setEditing(false);setDraft(msg.content)};
@@ -1017,8 +1125,9 @@ function Bubble({msg,index,onEdit,onDelete,searchQ,timestamp}) {
     if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();save();}
     if(e.key==='Escape')cancel();
   };
-
   const copy=()=>navigator.clipboard.writeText(msg.content);
+  const askDelete=()=>{ setCtx(null); setConfirmDel(true); };
+  const doDelete=()=>{ setConfirmDel(false); onDelete(index); };
 
   const renderContent=text=>{
     const parts=text.split(/(```[\s\S]*?```)/g);
@@ -1031,21 +1140,32 @@ function Bubble({msg,index,onEdit,onDelete,searchQ,timestamp}) {
     });
   };
 
-  const onContextMenu=e=>{
-    e.preventDefault();
-    setCtx({x:e.clientX,y:e.clientY});
-  };
+  const onContextMenu=e=>{e.preventDefault();setCtx({x:e.clientX,y:e.clientY});};
 
   const ctxItems=[
     {icon:'✎',label:'Edit',fn:startEdit},
     {icon:'⎘',label:'Copy',fn:copy},
     'sep',
-    {icon:'✕',label:'Delete',fn:()=>onDelete(index),danger:true},
+    {icon:'✕',label:'Delete',fn:askDelete,danger:true},
   ];
+
+  const preview = msg.content.length > 60
+    ? msg.content.slice(0,60) + '…'
+    : msg.content;
 
   return (
     <>
     {ctx && <CtxMenu x={ctx.x} y={ctx.y} items={ctxItems} onClose={()=>setCtx(null)}/>}
+    {confirmDel && (
+      <ConfirmModal
+        icon="🗑"
+        title="Delete this message?"
+        body={<>This will permanently remove: <br/><em style={{color:'var(--tx-tertiary)',fontSize:12}}>"{preview}"</em></>}
+        confirmLabel="Delete"
+        onConfirm={doDelete}
+        onCancel={()=>setConfirmDel(false)}
+      />
+    )}
     <div className={`msg-row ${isUser?'user':'ai'}`} onContextMenu={onContextMenu}>
       <div className="msg-meta">
         <div className="msg-avatar">{isUser?'🧝':'⚔'}</div>
@@ -1056,7 +1176,7 @@ function Bubble({msg,index,onEdit,onDelete,searchQ,timestamp}) {
         <div className="bubble-actions">
           <button className="bact" onClick={startEdit}>✎ Edit</button>
           <button className="bact" onClick={copy}>⎘ Copy</button>
-          <button className="bact red" onClick={()=>onDelete(index)}>✕</button>
+          <button className="bact red" onClick={askDelete}>✕</button>
         </div>
         {editing ? (
           <>
@@ -1457,10 +1577,11 @@ function App() {
     addToast('Sleep cycle complete — world & NPC memory updated','success');
   };
 
+  const [confirmClear,setConfirmClear]=useState(false);
   const clearHistory=async()=>{
-    if(!confirm('Delete all chat history? This cannot be undone.'))return;
     await api.post('/api/history/clear',{});
     setStats(s=>({...s,messages:0}));
+    setConfirmClear(false);
     addToast('Chat history cleared','info');
     window.location.reload();
   };
@@ -1535,7 +1656,7 @@ function App() {
             <div className="nb-icon">🌙</div>
             <span>{sleeping?'Running…':'Sleep Cycle'}</span>
           </button>
-          <button className="nav-btn red" onClick={clearHistory}>
+          <button className="nav-btn red" onClick={()=>setConfirmClear(true)}>
             <div className="nb-icon">🗑</div>
             <span>Clear History</span>
           </button>
@@ -1552,6 +1673,16 @@ function App() {
         {tab==='prompts' && <PromptsPanel toast={addToast}/>}
       </main>
 
+      {confirmClear && (
+        <ConfirmModal
+          icon="⚠️"
+          title="Clear all chat history?"
+          body="This permanently deletes every message in this session. Your world state and NPC memory are kept, but the conversation log cannot be recovered."
+          confirmLabel="Clear Everything"
+          onConfirm={clearHistory}
+          onCancel={()=>setConfirmClear(false)}
+        />
+      )}
       <ToastStack toasts={toasts}/>
     </div>
   );

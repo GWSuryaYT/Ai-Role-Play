@@ -5,22 +5,21 @@
         "Calm",
         "Focused"
       ],
-      "last_seen_location": "Forest Clearing",
-      "topics_discussed": [
-        "Hunting Boar"
-      ],
+      "last_seen_location": "",
+      "topics_discussed": [],
       "relationship": [
         "Neutral"
       ],
-      "last_interaction_summary": "Cast fire spell without fuel source"
+      "last_interaction_summary": ""
     },
     "Surya": {
       "name": "Surya",
-      "level": 1,
+      "level": 11,
       "attributes": [
         "Magical Affinity: Multi-Elemental (Fire, Air, Earth, Water)",
-        "Base Mana Reserve: Stable",
-        "Active Skill/Spell: None Defined"
+        "Base Mana Reserve: Extremely Stable",
+        "Active Skill/Spell: Mastered Intermediate Magic Manifestation (+5 Level)",
+        "Recent Advancements: Advanced Fire Control, Perfected Elemental Balancing"
       ],
       "progress_updates": [
         "Day 2 - Mastered Fire Magic Class (+4 Level)",
