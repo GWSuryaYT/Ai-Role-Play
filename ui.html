@@ -956,12 +956,18 @@ function initParticles(isDark) {
 }
 
 /* ── UTIL ────────────────────────────────────────────────────────────────── */
+const safe_str = v => {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+};
+
 const fmt_time = ts => {
   const d = new Date(ts);
   return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
 };
 const rel_class = r => {
-  const v = (r||'').toLowerCase();
+  const v = (typeof r==='string'?r:String(r||'')).toLowerCase();
   if (/(friend|ally|trust|like|admir|fond)/.test(v)) return 'rel-friendly';
   if (/(host|enemy|hate|fear|suspi|wary|rival)/.test(v)) return 'rel-hostile';
   return 'rel-neutral';
@@ -1384,18 +1390,55 @@ function WorldPanel({toast}) {
 }
 
 /* ── NPC PANEL ───────────────────────────────────────────────────────────── */
-function NpcPanel() {
-  const [npcs,setNpcs]=useState({});
-  const [sel,setSel]=useState(null);
+function NpcPanel({toast}) {
+  const [npcs,    setNpcs]    = useState({});
+  const [sel,     setSel]     = useState(null);
+  const [jsonTxt, setJsonTxt] = useState('');
+  const [dirty,   setDirty]   = useState(false);
 
-  useEffect(()=>{api.get('/api/npcs').then(d=>setNpcs(d.npcs||{}));},[]);
+  const load = async () => {
+    const d = await api.get('/api/npcs');
+    setNpcs(d.npcs || {});
+  };
+  useEffect(()=>{ load(); },[]);
 
-  const entries=Object.entries(npcs);
-  const selNpc=sel?npcs[sel]:null;
-  const rc=sel?rel_class(selNpc?.relationship):'rel-neutral';
-  const [bg,fg]=sel?npc_color(sel):['#1a1a1a','#888'];
+  // When selection changes, populate the editor
+  useEffect(()=>{
+    if (sel && npcs[sel]) {
+      setJsonTxt(JSON.stringify(npcs[sel], null, 2));
+      setDirty(false);
+    }
+  },[sel, npcs]);
 
-  if(!entries.length) return (
+  const saveNpc = async () => {
+    try {
+      const parsed   = JSON.parse(jsonTxt);
+      const updated  = { ...npcs, [sel]: parsed };
+      await api.post('/api/npcs/update', { npcs: updated });
+      await load();
+      setDirty(false);
+      toast('NPC saved', 'success');
+    } catch(e) {
+      toast('Invalid JSON — fix syntax first', 'error');
+    }
+  };
+
+  const deleteNpc = async () => {
+    const updated = { ...npcs };
+    delete updated[sel];
+    await api.post('/api/npcs/update', { npcs: updated });
+    setSel(null);
+    setJsonTxt('');
+    await load();
+    toast(`${sel} removed from memory`, 'info');
+  };
+
+  const entries = Object.entries(npcs);
+  const selNpc  = sel ? npcs[sel] : null;
+  const rc      = sel ? rel_class(selNpc?.relationship) : 'rel-neutral';
+  const [bg,fg] = sel ? npc_color(sel) : ['#1a1a1a','#888'];
+
+  if (!entries.length) return (
     <div className="panel">
       <div className="panel-head">
         <div className="panel-title">🧑 NPC Memory</div>
@@ -1406,7 +1449,7 @@ function NpcPanel() {
           <div style={{fontSize:40,marginBottom:14,opacity:.3}}>🧑</div>
           <div style={{fontFamily:'var(--font-heading)',fontSize:14,color:'var(--tx-tertiary)',marginBottom:8}}>No Characters Yet</div>
           <div style={{fontSize:13,color:'var(--tx-tertiary)',maxWidth:280,lineHeight:1.7}}>
-            NPCs you speak with will be remembered here after a sleep cycle runs — personality, relationship, and what was discussed.
+            NPCs you speak with will be remembered here after a sleep cycle runs.
           </div>
         </div>
       </div>
@@ -1416,23 +1459,26 @@ function NpcPanel() {
   return (
     <div className="panel">
       <div className="npc-layout">
-        {/* List */}
+
+        {/* ── Left: NPC list ── */}
         <div className="npc-list">
           <div className="npc-list-head">
             <span>{entries.length} character{entries.length!==1?'s':''}</span>
           </div>
           <div className="npc-list-body">
             {entries.map(([name,data])=>{
-              const rc2=rel_class(data.relationship);
-              const [ibg,ifg]=npc_color(name);
+              const rc2       = rel_class(data.relationship);
+              const [ibg,ifg] = npc_color(name);
               return (
-                <div key={name} className={`npc-item ${rc2} ${sel===name?'active':''}`} onClick={()=>setSel(sel===name?null:name)}>
+                <div key={name}
+                  className={`npc-item ${rc2} ${sel===name?'active':''}`}
+                  onClick={()=>{ if(sel===name){setSel(null);setJsonTxt('');}else setSel(name); }}>
                   <div className="npc-initial" style={{background:ibg,color:ifg,border:`1px solid ${ifg}33`}}>
                     {name[0].toUpperCase()}
                   </div>
                   <div className="npc-item-info">
                     <div className="npc-item-name">{name}</div>
-                    <div className="npc-item-rel">{data.relationship||'Neutral'}</div>
+                    <div className="npc-item-rel">{safe_str(data.relationship)||'Neutral'}</div>
                   </div>
                   <div className={`npc-rel-dot ${rc2}`}/>
                 </div>
@@ -1441,43 +1487,57 @@ function NpcPanel() {
           </div>
         </div>
 
-        {/* Detail */}
+        {/* ── Right: detail + editor ── */}
         <div className="npc-detail-pane">
           {!sel ? (
             <div className="npc-empty">
               <div style={{fontSize:28,opacity:.25,marginBottom:10}}>←</div>
-              <div style={{fontSize:12,color:'var(--tx-tertiary)',fontFamily:'var(--font-mono)'}}>Select a character</div>
+              <div style={{fontSize:12,color:'var(--tx-tertiary)',fontFamily:'var(--font-mono)'}}>Select a character to view or edit</div>
             </div>
           ) : (
             <>
+              {/* Header strip */}
               <div className="npc-detail-head">
                 <div className={`npc-large-avatar ${rc}`} style={{background:bg,color:fg,border:`1px solid ${fg}33`}}>
                   {sel[0].toUpperCase()}
                 </div>
-                <div>
+                <div style={{flex:1}}>
                   <div className="npc-d-name">{sel}</div>
                   <div className={`npc-d-rel ${rc}`}>
                     <div className={`npc-rel-dot ${rc}`}/>
-                    {selNpc?.relationship||'Neutral'}
+                    {safe_str(selNpc?.relationship)||'Neutral'}
                   </div>
-                  {selNpc?.last_seen_location && <div className="npc-d-loc">📍 {selNpc.last_seen_location}</div>}
+                  {selNpc?.last_seen_location &&
+                    <div className="npc-d-loc">📍 {safe_str(selNpc.last_seen_location)}</div>}
                 </div>
               </div>
-              <div className="npc-detail-body">
-                {[
-                  ['Personality',selNpc?.personality],
-                  ['Topics Discussed',selNpc?.topics_discussed],
-                  ['Last Interaction',selNpc?.last_interaction_summary],
-                ].filter(([,v])=>v).map(([k,v])=>(
-                  <div className="npc-field" key={k}>
-                    <div className="nfc-key">{k}</div>
-                    <div className="nfc-val">{typeof v==='object'?JSON.stringify(v,null,2):v}</div>
-                  </div>
-                ))}
+
+              {/* JSON editor */}
+              <div className="npc-detail-body" style={{display:'flex',flexDirection:'column',gap:10}}>
+                <div style={{fontSize:9,letterSpacing:'.15em',textTransform:'uppercase',
+                  color:'var(--tx-tertiary)',fontFamily:'var(--font-mono)',marginBottom:2}}>
+                  Edit Memory File {dirty && <span style={{color:'var(--gold)'}}>● unsaved</span>}
+                </div>
+                <textarea
+                  className="json-ed"
+                  value={jsonTxt}
+                  onChange={e=>{ setJsonTxt(e.target.value); setDirty(true); }}
+                  rows={18}
+                  spellCheck={false}
+                />
+                <div className="btn-row" style={{marginTop:4}}>
+                  <button className="btn btn-gold" onClick={saveNpc}>💾 Save Changes</button>
+                  <button className="btn btn-ghost" onClick={()=>{
+                    setJsonTxt(JSON.stringify(npcs[sel],null,2)); setDirty(false);
+                  }}>↺ Reload</button>
+                  <button className="btn btn-danger" style={{marginLeft:'auto'}}
+                    onClick={deleteNpc}>🗑 Delete NPC</button>
+                </div>
               </div>
             </>
           )}
         </div>
+
       </div>
     </div>
   );
@@ -1669,7 +1729,7 @@ function App() {
       <main className="main">
         {tab==='chat'    && <ChatPanel    setStatus={setStatus} setDebug={setDebug} stats={stats} setStats={setStats}/>}
         {tab==='world'   && <WorldPanel   toast={addToast}/>}
-        {tab==='npcs'    && <NpcPanel/>}
+        {tab==='npcs'    && <NpcPanel toast={addToast}/>}
         {tab==='prompts' && <PromptsPanel toast={addToast}/>}
       </main>
 

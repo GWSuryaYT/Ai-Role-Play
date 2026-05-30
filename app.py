@@ -69,6 +69,14 @@ def handle_world():
 def get_npcs():
     return jsonify(load_npc_memory())
 
+@app.route('/api/npcs/update', methods=['POST'])
+def update_npcs():
+    data = request.json
+    npcs = data.get('npcs', {})
+    from agent_pipeline import save_npc_memory
+    save_npc_memory({'npcs': npcs})
+    return jsonify({'success': True})
+
 @app.route('/api/sleep', methods=['POST'])
 def force_sleep():
     history = load_history()
